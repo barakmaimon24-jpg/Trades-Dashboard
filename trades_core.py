@@ -199,6 +199,7 @@ def parse_trades(xml_text: str) -> tuple[pd.DataFrame, float | None, pd.Series, 
                 "cost_basis": _safe_float(_get_attr(node, "costBasisMoney", "costBasis"), None),
                 "avg_cost": _safe_float(_get_attr(node, "avgCost", "averageCost", "costBasisPrice", "openPrice"), None),
                 "percent_of_nav": _safe_float(_get_attr(node, "percentOfNAV", "percentageOfNAV", "percentOfNetLiq", "percentOfNetLiquidation"), None),
+                "level_of_detail": node.get("levelOfDetail", ""),
             }
         )
     open_positions = pd.DataFrame(open_rows)
@@ -209,6 +210,12 @@ def parse_trades(xml_text: str) -> tuple[pd.DataFrame, float | None, pd.Series, 
             & open_positions["position"].notna()
             & (open_positions["position"].abs() > 1e-9)
         ].reset_index(drop=True)
+        if "level_of_detail" in open_positions.columns:
+            summary_rows = open_positions[
+                open_positions["level_of_detail"].astype(str).str.upper().eq("SUMMARY")
+            ]
+            if not summary_rows.empty:
+                open_positions = summary_rows.reset_index(drop=True)
     return trades, latest_total, equity_series, open_positions
 
 
@@ -444,6 +451,69 @@ def match_trades(trades: pd.DataFrame, live_prices: dict[str, float]) -> tuple[p
     return open_df, closed_df.drop(columns=["entry_time", "exit_time"])
 
 
+def build_open_positions_from_ib(
+    open_positions: pd.DataFrame,
+    matched_open_trades: pd.DataFrame,
+    live_prices: dict[str, float],
+    total_portfolio: float | None,
+) -> pd.DataFrame:
+    if open_positions.empty:
+        return pd.DataFrame()
+
+    rows = []
+    matched_by_symbol = (
+        matched_open_trades.set_index("symbol").to_dict(orient="index")
+        if not matched_open_trades.empty and "symbol" in matched_open_trades.columns
+        else {}
+    )
+    for _, row in open_positions.iterrows():
+        symbol = row.get("symbol", "")
+        position = row.get("position")
+        if not symbol or position is None or pd.isna(position) or abs(float(position)) <= 1e-9:
+            continue
+
+        quantity = abs(float(position))
+        direction = "LONG" if float(position) > 0 else "SHORT"
+        mark_price = row.get("mark_price")
+        last_price = float(live_prices.get(symbol, mark_price if pd.notna(mark_price) else 0.0))
+        position_value = row.get("position_value")
+        if position_value is None or pd.isna(position_value):
+            position_value = quantity * last_price
+        cost_basis = row.get("cost_basis")
+        avg_cost = row.get("avg_cost")
+        if (cost_basis is None or pd.isna(cost_basis) or cost_basis == 0) and avg_cost is not None and pd.notna(avg_cost):
+            cost_basis = quantity * float(avg_cost)
+        if avg_cost is None or pd.isna(avg_cost):
+            avg_cost = (float(cost_basis) / quantity) if cost_basis and quantity else None
+        unrealized_pnl = row.get("unrealized_pnl")
+        if unrealized_pnl is None or pd.isna(unrealized_pnl):
+            if avg_cost is not None and pd.notna(avg_cost):
+                unrealized_pnl = ((last_price - float(avg_cost)) if direction == "LONG" else (float(avg_cost) - last_price)) * quantity
+            else:
+                unrealized_pnl = 0.0
+
+        matched = matched_by_symbol.get(symbol, {})
+        rows.append(
+            {
+                "entry_date": matched.get("entry_date"),
+                "symbol": symbol,
+                "quantity": quantity,
+                "direction": direction,
+                "avg_entry": avg_cost,
+                "pnl_pct": float(unrealized_pnl) / float(cost_basis) * 100 if cost_basis else 0.0,
+                "unrealized_pnl": float(unrealized_pnl),
+                "holding_days": matched.get("holding_days"),
+                "last_price": last_price,
+                "position_value": float(position_value) if position_value is not None and pd.notna(position_value) else None,
+                "cost_basis": float(cost_basis) if cost_basis is not None and pd.notna(cost_basis) else None,
+                "portfolio_pct": float(position_value) / total_portfolio * 100 if total_portfolio and position_value is not None and pd.notna(position_value) else 0.0,
+                "pnl_portfolio_pct": float(unrealized_pnl) / total_portfolio * 100 if total_portfolio else 0.0,
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values(["symbol"], ignore_index=True) if rows else pd.DataFrame()
+
+
 def build_dashboard_data(xml_text: str, refresh_market: bool = False) -> dict:
     trades, total_portfolio, equity_series, open_positions = parse_trades(xml_text)
     filtered = trades.copy()
@@ -462,12 +532,12 @@ def build_dashboard_data(xml_text: str, refresh_market: bool = False) -> dict:
     open_trades, _ = match_trades(filtered, live_prices)
     _, closed_trades = match_trades(filtered, live_prices)
 
-    if not open_trades.empty:
-        open_trades["equity_at_entry"] = open_trades["entry_date"].apply(lambda d: equity_for_date(equity_series, pd.to_datetime(d)))
-        open_trades["position_value"] = open_trades["quantity"] * open_trades["last_price"]
-        open_trades["cost_basis"] = open_trades["quantity"] * open_trades["avg_entry"]
-        open_trades["portfolio_pct"] = open_trades.apply(lambda row: row["position_value"] / row["equity_at_entry"] * 100 if row["equity_at_entry"] else 0.0, axis=1)
-        open_trades["pnl_portfolio_pct"] = open_trades.apply(lambda row: row["unrealized_pnl"] / row["equity_at_entry"] * 100 if row["equity_at_entry"] else 0.0, axis=1)
+    api_open_positions = build_open_positions_from_ib(
+        open_positions,
+        open_trades,
+        live_prices,
+        total_portfolio,
+    )
 
     if not closed_trades.empty:
         closed_trades["equity_at_entry"] = closed_trades["entry_date"].apply(lambda d: equity_for_date(equity_series, pd.to_datetime(d)))
@@ -491,7 +561,7 @@ def build_dashboard_data(xml_text: str, refresh_market: bool = False) -> dict:
             "total_commission": float(filtered["ib_commission"].sum()),
             "avg_commission_per_trade": float(filtered["ib_commission"].sum()) / total_trades if total_trades else 0.0,
         },
-        "open_positions": records_for_api(open_trades),
+        "open_positions": records_for_api(api_open_positions),
         "closed_trades": records_for_api(closed_trades),
         "raw_trades": records_for_api(filtered),
         "market_debug": market_debug,
