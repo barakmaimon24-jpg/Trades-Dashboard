@@ -11,6 +11,21 @@ import streamlit as st
 import yfinance as yf
 import altair as alt
 
+
+def _load_local_env(path: str = ".env") -> None:
+    if not os.path.exists(path):
+        return
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip().lstrip("\ufeff")
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, value = text.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_load_local_env()
+
 HISTORY_EXPORT_BASE_DIRS = {
     "winning": r"G:\My Drive\SetupsMaster\Trades\history_trades\winning",
     "losing": r"G:\My Drive\SetupsMaster\Trades\history_trades\losing",

@@ -15,7 +15,7 @@ def _load_local_env(path: str = ".env") -> None:
         return
     with open(path, "r", encoding="utf-8") as handle:
         for line in handle:
-            text = line.strip()
+            text = line.strip().lstrip("\ufeff")
             if not text or text.startswith("#") or "=" not in text:
                 continue
             key, value = text.split("=", 1)
