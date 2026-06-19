@@ -27,13 +27,11 @@ if not errorlevel 1 (
   exit /b 1
 )
 
-curl.exe -fsS --max-time 2 http://127.0.0.1:8000/api/health >nul 2>nul
-if errorlevel 1 (
-  echo Starting Trades Dashboard API...
-  start "Trades Dashboard API" cmd /k "python -m uvicorn api:app --host 127.0.0.1 --port 8000"
-) else (
-  echo Trades Dashboard API is already running.
+echo Restarting Trades Dashboard API...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
+  taskkill /PID %%p /F >nul 2>nul
 )
+start "Trades Dashboard API" cmd /k "python -m uvicorn api:app --host 127.0.0.1 --port 8000"
 
 echo Waiting for API...
 for /l %%i in (1,1,30) do (

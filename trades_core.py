@@ -411,6 +411,7 @@ def match_trades(trades: pd.DataFrame, live_prices: dict[str, float]) -> tuple[p
         open_rows.append(
             {
                 "entry_date": entry_time.date() if pd.notna(entry_time) else None,
+                "entry_time": entry_time if pd.notna(entry_time) else None,
                 "symbol": symbol,
                 "quantity": abs(net_qty),
                 "direction": "LONG" if net_qty > 0 else "SHORT",
@@ -445,10 +446,11 @@ def match_trades(trades: pd.DataFrame, live_prices: dict[str, float]) -> tuple[p
     )
     closed_df["entry_date"] = closed_df["entry_time"].dt.date
     closed_df["exit_date"] = closed_df["exit_time"].dt.date
+    closed_df["entry_time_str"] = closed_df["entry_time"].dt.strftime("%H:%M")
     closed_df["exit_time_str"] = closed_df["exit_time"].dt.strftime("%H:%M")
     closed_df["market_value"] = closed_df["exit_price"] * closed_df["quantity"]
     closed_df["holding_days"] = (closed_df["exit_time"].dt.normalize() - closed_df["entry_time"].dt.normalize()).dt.days
-    return open_df, closed_df.drop(columns=["entry_time", "exit_time"])
+    return open_df, closed_df
 
 
 def build_open_positions_from_ib(
@@ -496,6 +498,7 @@ def build_open_positions_from_ib(
         rows.append(
             {
                 "entry_date": matched.get("entry_date"),
+                "entry_time": matched.get("entry_time"),
                 "symbol": symbol,
                 "quantity": quantity,
                 "direction": direction,
@@ -511,7 +514,13 @@ def build_open_positions_from_ib(
             }
         )
 
-    return pd.DataFrame(rows).sort_values(["symbol"], ignore_index=True) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(
+        ["portfolio_pct", "symbol"],
+        ascending=[False, True],
+        ignore_index=True,
+    )
 
 
 def build_dashboard_data(xml_text: str, refresh_market: bool = False) -> dict:
