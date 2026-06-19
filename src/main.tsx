@@ -74,15 +74,21 @@ function App() {
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
+  const fetchJson = async (url: string) => {
+    const response = await fetch(url);
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : null;
+    if (!response.ok) {
+      throw new Error(payload?.detail?.message || payload?.message || text || `Request failed with ${response.status}`);
+    }
+    return payload;
+  };
+
   const loadDashboard = React.useCallback(async (refreshMarket = false) => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/dashboard${refreshMarket ? "?refresh_market=true" : ""}`);
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload?.detail?.message || "Unable to load dashboard");
-      }
+      const payload = await fetchJson(`/api/dashboard${refreshMarket ? "?refresh_market=true" : ""}`);
       setData(payload);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load dashboard");
