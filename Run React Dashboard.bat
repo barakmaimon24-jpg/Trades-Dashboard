@@ -3,6 +3,30 @@ setlocal
 
 cd /d "%~dp0"
 
+if not exist ".env" (
+  copy ".env.example" ".env" >nul
+  echo Created .env from .env.example.
+  echo Edit .env and set IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID, then run this file again.
+  pause
+  exit /b 1
+)
+
+findstr /c:"your-flex-token" ".env" >nul 2>nul
+if not errorlevel 1 (
+  echo .env still contains the placeholder IBKR_FLEX_TOKEN value.
+  echo Edit .env and set your real IBKR Flex token, then run this file again.
+  pause
+  exit /b 1
+)
+
+findstr /c:"your-flex-query-id" ".env" >nul 2>nul
+if not errorlevel 1 (
+  echo .env still contains the placeholder IBKR_FLEX_QUERY_ID value.
+  echo Edit .env and set your real IBKR Flex query id, then run this file again.
+  pause
+  exit /b 1
+)
+
 curl.exe -fsS --max-time 2 http://127.0.0.1:8000/api/health >nul 2>nul
 if errorlevel 1 (
   echo Starting Trades Dashboard API...
