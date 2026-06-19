@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trades Dashboard</title>
+    <style>
+      :root {
+        --ink: #14120f;
+        --ink-soft: #3a342f;
+        --ink-faint: #6f635a;
+        --paper: #f6efe5;
+        --paper-deep: #efe3d2;
+        --accent: #c9692b;
+        --accent-2: #0a6c74;
+        --win: #1a7f4b;
+        --loss: #b63a32;
+        --panel: #fffaf3;
+        --shadow: 0 12px 24px rgba(20, 18, 15, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+        color: var(--ink);
+        background: radial-gradient(1200px 600px at 10% 10%, #fff7ea 0%, #f4e7d8 45%, #e5d3c2 100%);
+        min-height: 100vh;
+      }
+
+      header {
+        padding: 48px 6vw 24px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .title {
+        font-size: clamp(2rem, 3vw, 3.2rem);
+        letter-spacing: 0.02em;
+      }
+
+      .subtitle {
+        font-size: 1.05rem;
+        color: var(--ink-soft);
+        max-width: 680px;
+      }
+
+      .status {
+        font-size: 0.95rem;
+        color: var(--ink-faint);
+      }
+
+      main {
+        padding: 0 6vw 64px;
+        display: grid;
+        gap: 28px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      }
+
+      .card {
+        background: var(--panel);
+        border: 1px solid rgba(20, 18, 15, 0.08);
+        border-radius: 18px;
+        padding: 18px 20px;
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: -40% 50% auto auto;
+        width: 160px;
+        height: 160px;
+        background: radial-gradient(circle, rgba(201, 105, 43, 0.18), transparent 70%);
+        pointer-events: none;
+      }
+
+      .card h3 {
+        margin: 0 0 10px;
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: var(--ink-faint);
+      }
+
+      .card .value {
+        font-size: 1.7rem;
+        font-weight: 600;
+      }
+
+      .card .note {
+        margin-top: 8px;
+        font-size: 0.9rem;
+        color: var(--ink-soft);
+      }
+
+      .panel {
+        background: linear-gradient(140deg, rgba(255, 255, 255, 0.86), rgba(246, 239, 229, 0.9));
+        border-radius: 22px;
+        padding: 24px;
+        box-shadow: var(--shadow);
+        border: 1px solid rgba(20, 18, 15, 0.07);
+      }
+
+      .panel h2 {
+        margin: 0 0 16px;
+        font-size: 1.2rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .sparkline {
+        width: 100%;
+        height: 120px;
+      }
+
+      .bar {
+        height: 12px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.95rem;
+      }
+
+      .table th,
+      .table td {
+        text-align: left;
+        padding: 10px 6px;
+        border-bottom: 1px solid rgba(20, 18, 15, 0.08);
+      }
+
+      .table th {
+        color: var(--ink-faint);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 0.75rem;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: rgba(10, 108, 116, 0.12);
+        color: var(--accent-2);
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .win {
+        color: var(--win);
+      }
+
+      .loss {
+        color: var(--loss);
+      }
+
+      .file-loader {
+        margin-top: 16px;
+        display: none;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .file-loader input[type="file"] {
+        font-family: "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      }
+
+      .fade-in {
+        animation: fadeIn 700ms ease-out both;
+      }
+
+      .stagger > * {
+        animation: rise 600ms ease-out both;
+      }
+
+      .stagger > *:nth-child(2) {
+        animation-delay: 120ms;
+      }
+      .stagger > *:nth-child(3) {
+        animation-delay: 240ms;
+      }
+      .stagger > *:nth-child(4) {
+        animation-delay: 360ms;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes rise {
+        from {
+          opacity: 0;
+          transform: translateY(18px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @media (max-width: 720px) {
+        header {
+          padding: 32px 6vw 16px;
+        }
+        .panel {
+          padding: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="fade-in">
+      <div class="pill">Trades Dashboard</div>
+      <div class="title">A quick pulse on your trading year</div>
+      <div class="subtitle">
+        Reads `Data.xml` in this folder. If the browser blocks local file reads, use the file picker below.
+      </div>
+      <div class="status" id="status">Loading data…</div>
+      <div class="file-loader" id="fileLoader">
+        <label for="fileInput">Select Data.xml:</label>
+        <input id="fileInput" type="file" accept=".xml" />
+      </div>
+    </header>
+
+    <main>
+      <section class="grid stagger" id="kpiGrid"></section>
+
+      <section class="panel fade-in">
+        <h2>Momentum</h2>
+        <div class="status" id="rangeLine">Date range</div>
+        <svg class="sparkline" id="pnlSparkline" viewBox="0 0 600 120" preserveAspectRatio="none">
+          <path id="pnlLine" fill="none" stroke="var(--accent-2)" stroke-width="3" />
+          <path id="pnlArea" fill="rgba(10, 108, 116, 0.2)" />
+        </svg>
+      </section>
+
+      <section class="panel fade-in">
+        <h2>Win Rate</h2>
+        <div class="status" id="winRateLine"></div>
+        <div class="bar" id="winRateBar"></div>
+      </section>
+
+      <section class="panel fade-in">
+        <h2>Top Symbols</h2>
+        <table class="table" id="symbolTable"></table>
+      </section>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const fileLoader = document.getElementById("fileLoader");
+      const fileInput = document.getElementById("fileInput");
+      const kpiGrid = document.getElementById("kpiGrid");
+      const rangeLine = document.getElementById("rangeLine");
+      const winRateLine = document.getElementById("winRateLine");
+      const winRateBar = document.getElementById("winRateBar");
+      const pnlLine = document.getElementById("pnlLine");
+      const pnlArea = document.getElementById("pnlArea");
+      const symbolTable = document.getElementById("symbolTable");
+
+      function parseNumber(value) {
+        if (value === null || value === undefined || value === "") {
+          return 0;
+        }
+        return Number(value);
+      }
+
+      function formatMoney(value) {
+        const sign = value < 0 ? "-" : "";
+        const abs = Math.abs(value);
+        return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+      }
+
+      function formatDate(yyyymmdd) {
+        if (!yyyymmdd || yyyymmdd.length !== 8) return yyyymmdd || "";
+        const y = yyyymmdd.slice(0, 4);
+        const m = yyyymmdd.slice(4, 6);
+        const d = yyyymmdd.slice(6, 8);
+        return `${y}-${m}-${d}`;
+      }
+
+      function toSvgPath(points) {
+        if (!points.length) return "";
+        return points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+      }
+
+      function renderDashboard(trades) {
+        if (!trades.length) {
+          statusEl.textContent = "No trades found in Data.xml.";
+          return;
+        }
+
+        const tradeDates = trades.map((t) => t.tradeDate).filter(Boolean).sort();
+        const minDate = tradeDates[0];
+        const maxDate = tradeDates[tradeDates.length - 1];
+
+        const totalTrades = trades.length;
+        const totalPnl = trades.reduce((sum, t) => sum + t.fifoPnlRealized, 0);
+        const totalCommission = trades.reduce((sum, t) => sum + t.ibCommission, 0);
+        const wins = trades.filter((t) => t.fifoPnlRealized > 0).length;
+        const losses = trades.filter((t) => t.fifoPnlRealized < 0).length;
+        const flat = trades.filter((t) => t.fifoPnlRealized === 0).length;
+        const winRate = wins + losses === 0 ? 0 : (wins / (wins + losses)) * 100;
+
+        const totalWin = trades.filter((t) => t.fifoPnlRealized > 0).reduce((sum, t) => sum + t.fifoPnlRealized, 0);
+        const totalLoss = trades.filter((t) => t.fifoPnlRealized < 0).reduce((sum, t) => sum + t.fifoPnlRealized, 0);
+        const avgWin = wins === 0 ? 0 : totalWin / wins;
+        const avgLoss = losses === 0 ? 0 : totalLoss / losses;
+        const largestWin = trades.reduce((best, t) => (t.fifoPnlRealized > best ? t.fifoPnlRealized : best), -Infinity);
+        const largestLoss = trades.reduce((best, t) => (t.fifoPnlRealized < best ? t.fifoPnlRealized : best), Infinity);
+
+        kpiGrid.innerHTML = "";
+        const cards = [
+          { label: "Total Trades", value: totalTrades, note: `${wins} wins · ${losses} losses · ${flat} flat` },
+          { label: "Realized PnL", value: formatMoney(totalPnl), note: `${formatMoney(largestWin)} best · ${formatMoney(largestLoss)} worst` },
+          { label: "Avg Win / Loss", value: `${formatMoney(avgWin)} / ${formatMoney(avgLoss)}`, note: `${wins} wins, ${losses} losses` },
+          { label: "Total Commissions", value: formatMoney(totalCommission), note: "Broker fees paid" },
+        ];
+        for (const card of cards) {
+          const el = document.createElement("div");
+          el.className = "card";
+          el.innerHTML = `<h3>${card.label}</h3><div class="value">${card.value}</div><div class="note">${card.note}</div>`;
+          kpiGrid.appendChild(el);
+        }
+
+        rangeLine.textContent = `From ${formatDate(minDate)} to ${formatDate(maxDate)} · ${totalTrades} trades`;
+        statusEl.textContent = "Data loaded";
+
+        const pnlByDate = new Map();
+        for (const trade of trades) {
+          const key = trade.tradeDate || "Unknown";
+          pnlByDate.set(key, (pnlByDate.get(key) || 0) + trade.fifoPnlRealized);
+        }
+        const dateKeys = Array.from(pnlByDate.keys()).filter((d) => d !== "Unknown").sort();
+        let cumulative = 0;
+        const points = dateKeys.map((d, idx) => {
+          cumulative += pnlByDate.get(d);
+          return { x: idx, y: cumulative };
+        });
+
+        if (points.length) {
+          const minY = Math.min(...points.map((p) => p.y), 0);
+          const maxY = Math.max(...points.map((p) => p.y), 0);
+          const xScale = points.length > 1 ? 600 / (points.length - 1) : 0;
+          const yRange = maxY - minY || 1;
+          const scaled = points.map((p, i) => ({
+            x: i * xScale,
+            y: 110 - ((p.y - minY) / yRange) * 90,
+          }));
+          pnlLine.setAttribute("d", toSvgPath(scaled));
+          const areaPath = `${toSvgPath(scaled)} L 600 120 L 0 120 Z`;
+          pnlArea.setAttribute("d", areaPath);
+        }
+
+        winRateLine.textContent = `${winRate.toFixed(1)}% wins (excluding flat trades)`;
+        winRateBar.style.width = `${Math.max(3, winRate)}%`;
+
+        const symbolMap = new Map();
+        for (const trade of trades) {
+          const entry = symbolMap.get(trade.symbol) || { symbol: trade.symbol, pnl: 0, trades: 0 };
+          entry.pnl += trade.fifoPnlRealized;
+          entry.trades += 1;
+          symbolMap.set(trade.symbol, entry);
+        }
+        const topSymbols = Array.from(symbolMap.values())
+          .sort((a, b) => b.pnl - a.pnl)
+          .slice(0, 8);
+
+        symbolTable.innerHTML = `
+          <thead>
+            <tr><th>Symbol</th><th>Trades</th><th>Realized PnL</th></tr>
+          </thead>
+          <tbody>
+            ${topSymbols
+              .map(
+                (s) => `
+              <tr>
+                <td>${s.symbol || "Unknown"}</td>
+                <td>${s.trades}</td>
+                <td class="${s.pnl >= 0 ? "win" : "loss"}">${formatMoney(s.pnl)}</td>
+              </tr>
+            `
+              )
+              .join("")}
+          </tbody>
+        `;
+      }
+
+      function extractTrades(xmlText) {
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(xmlText, "text/xml");
+        const nodes = Array.from(xml.querySelectorAll("Trade"));
+        return nodes.map((node) => ({
+          symbol: node.getAttribute("symbol"),
+          tradeDate: node.getAttribute("tradeDate"),
+          buySell: node.getAttribute("buySell"),
+          quantity: parseNumber(node.getAttribute("quantity")),
+          tradePrice: parseNumber(node.getAttribute("tradePrice")),
+          proceeds: parseNumber(node.getAttribute("proceeds")),
+          ibCommission: parseNumber(node.getAttribute("ibCommission")),
+          fifoPnlRealized: parseNumber(node.getAttribute("fifoPnlRealized")),
+          assetCategory: node.getAttribute("assetCategory"),
+        }));
+      }
+
+      async function loadDefaultFile() {
+        try {
+          const response = await fetch("Data.xml");
+          if (!response.ok) throw new Error("Fetch failed");
+          const xmlText = await response.text();
+          renderDashboard(extractTrades(xmlText));
+        } catch (err) {
+          statusEl.textContent = "Browser blocked local file access. Please choose Data.xml.";
+          fileLoader.style.display = "flex";
+        }
+      }
+
+      fileInput.addEventListener("change", async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        renderDashboard(extractTrades(text));
+      });
+
+      loadDefaultFile();
+    </script>
+  </body>
+</html>

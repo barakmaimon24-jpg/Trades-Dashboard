@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.log
+streamlit-*.out.log
+streamlit-*.err.log
+trade_notes.json
+Data.xml
+.streamlit/secrets.toml
