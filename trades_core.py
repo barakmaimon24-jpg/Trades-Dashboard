@@ -112,6 +112,10 @@ def _is_flex_send_retryable(message: str) -> bool:
 
 
 def _json_ready(value):
+    if isinstance(value, list):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _json_ready(item) for key, item in value.items()}
     if value is None or pd.isna(value):
         return None
     if isinstance(value, pd.Timestamp) or hasattr(value, "isoformat"):
@@ -320,7 +324,90 @@ def add_trade_segments(trades: pd.DataFrame) -> pd.DataFrame:
         .reset_index(level=0, drop=True)
     )
     trades["segment_max"] = trades.groupby(["symbol", "segment_id"])["position_running"].transform(lambda s: s.abs().max())
+    trades["segment_closed"] = trades.groupby(["symbol", "segment_id"])["position_running"].transform(lambda s: abs(float(s.iloc[-1])) <= 1e-9)
     return trades
+
+
+def _finalize_closed_trades(exit_rows: pd.DataFrame) -> pd.DataFrame:
+    if exit_rows.empty:
+        return exit_rows
+
+    exits = exit_rows[exit_rows["segment_closed"]].copy()
+    if exits.empty:
+        return pd.DataFrame()
+
+    exits["entry_time"] = pd.to_datetime(exits["entry_time"])
+    exits["exit_time"] = pd.to_datetime(exits["exit_time"])
+    exits["entry_date"] = exits["entry_time"].dt.date
+    exits["exit_date"] = exits["exit_time"].dt.date
+    exits["entry_time_str"] = exits["entry_time"].dt.strftime("%H:%M")
+    exits["exit_time_str"] = exits["exit_time"].dt.strftime("%H:%M")
+    exits["position_value"] = exits["entry_price"] * exits["quantity"]
+    exits["pnl_pct"] = exits.apply(lambda row: row["pnl"] / row["position_value"] * 100 if row["position_value"] else 0.0, axis=1)
+
+    trade_rows = []
+    for _, group in exits.groupby(["symbol", "segment_id"], sort=False):
+        quantity = group["quantity"].sum()
+        position_value = group["position_value"].sum()
+        pnl = group["pnl"].sum()
+        entry_price = position_value / quantity if quantity else 0.0
+        exit_price = (group["exit_price"] * group["quantity"]).sum() / quantity if quantity else 0.0
+        entry_time = group["entry_time"].min()
+        exit_time = group["exit_time"].max()
+        partials = []
+        for _, partial_group in group.groupby("exit_time", sort=True):
+            partial_quantity = partial_group["quantity"].sum()
+            partial_position_value = partial_group["position_value"].sum()
+            partial_pnl = partial_group["pnl"].sum()
+            partial_exit_time = partial_group["exit_time"].max()
+            segment_max = partial_group["segment_max"].max()
+            partials.append(
+                {
+                    "symbol": partial_group["symbol"].iloc[0],
+                    "quantity": partial_quantity,
+                    "trim_pct": partial_quantity / segment_max * 100 if segment_max else None,
+                    "direction": partial_group["direction"].iloc[0],
+                    "entry_price": partial_position_value / partial_quantity if partial_quantity else 0.0,
+                    "exit_price": (partial_group["exit_price"] * partial_group["quantity"]).sum() / partial_quantity if partial_quantity else 0.0,
+                    "entry_time": partial_group["entry_time"].min(),
+                    "exit_time": partial_exit_time,
+                    "pnl": partial_pnl,
+                    "segment_max": partial_group["segment_max"].max(),
+                    "segment_id": int(partial_group["segment_id"].iloc[0]),
+                    "entry_date": partial_group["entry_time"].min().date(),
+                    "exit_date": partial_exit_time.date(),
+                    "entry_time_str": partial_group["entry_time"].min().strftime("%H:%M"),
+                    "exit_time_str": partial_exit_time.strftime("%H:%M"),
+                    "position_value": partial_position_value,
+                    "pnl_pct": partial_pnl / partial_position_value * 100 if partial_position_value else 0.0,
+                    "holding_days": (partial_exit_time.normalize() - partial_group["entry_time"].min().normalize()).days,
+                }
+            )
+
+        trade_rows.append(
+            {
+                "symbol": group["symbol"].iloc[0],
+                "quantity": quantity,
+                "direction": group["direction"].iloc[0],
+                "entry_price": entry_price,
+                "exit_price": exit_price,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "pnl": pnl,
+                "segment_max": group["segment_max"].max(),
+                "segment_id": int(group["segment_id"].iloc[0]),
+                "entry_date": entry_time.date() if pd.notna(entry_time) else None,
+                "exit_date": exit_time.date() if pd.notna(exit_time) else None,
+                "entry_time_str": entry_time.strftime("%H:%M") if pd.notna(entry_time) else None,
+                "exit_time_str": exit_time.strftime("%H:%M") if pd.notna(exit_time) else None,
+                "position_value": position_value,
+                "pnl_pct": pnl / position_value * 100 if position_value else 0.0,
+                "holding_days": (exit_time.normalize() - entry_time.normalize()).days if pd.notna(entry_time) and pd.notna(exit_time) else None,
+                "partials": partials if len(partials) > 1 else [],
+            }
+        )
+
+    return pd.DataFrame(trade_rows).sort_values(["exit_time"], ascending=False, ignore_index=True)
 
 
 @lru_cache(maxsize=16)
@@ -386,6 +473,7 @@ def match_trades(trades: pd.DataFrame, live_prices: dict[str, float]) -> tuple[p
                     "pnl": ((price - lot["price"]) if lot["qty"] > 0 else (lot["price"] - price)) * abs(close_qty),
                     "segment_max": float(row["segment_max"]) if pd.notna(row.get("segment_max")) else None,
                     "segment_id": int(row["segment_id"]) if pd.notna(row.get("segment_id")) else None,
+                    "segment_closed": bool(row.get("segment_closed", False)),
                 }
             )
             lot["qty"] += close_qty
@@ -423,33 +511,7 @@ def match_trades(trades: pd.DataFrame, live_prices: dict[str, float]) -> tuple[p
             }
         )
     open_df = pd.DataFrame(open_rows).sort_values(["symbol"], ignore_index=True) if open_rows else pd.DataFrame()
-    closed_df = pd.DataFrame(closed_rows)
-    if closed_df.empty:
-        return open_df, closed_df
-    closed_df["entry_time"] = pd.to_datetime(closed_df["entry_time"])
-    closed_df["exit_time"] = pd.to_datetime(closed_df["exit_time"])
-    closed_df["exit_hour"] = closed_df["exit_time"].dt.floor("h")
-    closed_df = (
-        closed_df.groupby(["symbol", "exit_hour"], as_index=False)
-        .apply(lambda group: pd.Series({
-            "quantity": group["quantity"].sum(),
-            "direction": group["direction"].iloc[0],
-            "entry_price": (group["entry_price"] * group["quantity"]).sum() / group["quantity"].sum(),
-            "exit_price": (group["exit_price"] * group["quantity"]).sum() / group["quantity"].sum(),
-            "entry_time": group["entry_time"].min(),
-            "exit_time": group["exit_time"].max(),
-            "pnl": group["pnl"].sum(),
-            "segment_max": group["segment_max"].max(),
-            "segment_id": group["segment_id"].max(),
-        }))
-        .reset_index(drop=True)
-    )
-    closed_df["entry_date"] = closed_df["entry_time"].dt.date
-    closed_df["exit_date"] = closed_df["exit_time"].dt.date
-    closed_df["entry_time_str"] = closed_df["entry_time"].dt.strftime("%H:%M")
-    closed_df["exit_time_str"] = closed_df["exit_time"].dt.strftime("%H:%M")
-    closed_df["market_value"] = closed_df["exit_price"] * closed_df["quantity"]
-    closed_df["holding_days"] = (closed_df["exit_time"].dt.normalize() - closed_df["entry_time"].dt.normalize()).dt.days
+    closed_df = _finalize_closed_trades(pd.DataFrame(closed_rows))
     return open_df, closed_df
 
 
@@ -550,9 +612,19 @@ def build_dashboard_data(xml_text: str, refresh_market: bool = False) -> dict:
 
     if not closed_trades.empty:
         closed_trades["equity_at_entry"] = closed_trades["entry_date"].apply(lambda d: equity_for_date(equity_series, pd.to_datetime(d)))
-        closed_trades["position_value"] = closed_trades["entry_price"] * closed_trades["quantity"]
-        closed_trades["pnl_pct"] = closed_trades.apply(lambda row: row["pnl"] / row["position_value"] * 100 if row["position_value"] else 0.0, axis=1)
         closed_trades["pnl_portfolio_pct"] = closed_trades.apply(lambda row: row["pnl"] / row["equity_at_entry"] * 100 if row["equity_at_entry"] else 0.0, axis=1)
+        for idx, row in closed_trades.iterrows():
+            partials = row.get("partials")
+            if not partials:
+                continue
+            equity_at_entry = row.get("equity_at_entry")
+            closed_trades.at[idx, "partials"] = [
+                {
+                    **partial,
+                    "pnl_portfolio_pct": partial["pnl"] / equity_at_entry * 100 if equity_at_entry else 0.0,
+                }
+                for partial in partials
+            ]
 
     total_trades = len(closed_trades)
     wins = int((closed_trades["pnl"] > 0).sum()) if not closed_trades.empty else 0

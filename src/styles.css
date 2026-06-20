@@ -677,3 +677,40 @@ td:first-child {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.history-symbol-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trim-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #303a49;
+  border-radius: 6px;
+  background: #111a26;
+  color: #9aa7b7;
+  cursor: pointer;
+}
+
+.trim-toggle:hover {
+  color: #e7edf5;
+  border-color: #3d4a5c;
+}
+
+.trim-row td {
+  background: rgba(88, 166, 255, 0.04);
+  color: #b8c4d4;
+}
+
+.trim-label {
+  padding-left: 28px;
+  color: #9aa7b7;
+  font-size: 13px;
+  font-weight: 650;
+}

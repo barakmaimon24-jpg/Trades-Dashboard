@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { BarChart3, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { BarChart3, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, RefreshCw } from "lucide-react";
 import "./styles.css";
 
 type Stats = {
@@ -45,6 +45,9 @@ type ClosedTrade = {
   pnl: number;
   pnl_pct: number;
   pnl_portfolio_pct: number;
+  segment_max?: number | null;
+  trim_pct?: number | null;
+  partials?: ClosedTrade[];
 };
 
 type RawTrade = {
@@ -143,8 +146,7 @@ const inputDateValue = (date: Date) => {
 
 const defaultHistoryRange = () => {
   const end = new Date();
-  const start = new Date(end);
-  start.setDate(start.getDate() - 14);
+  const start = new Date(end.getFullYear(), 0, 1);
   return {
     start: inputDateValue(start),
     end: inputDateValue(end)
@@ -367,9 +369,10 @@ function App() {
     start: displayDateValue(defaultRange.start),
     end: displayDateValue(defaultRange.end)
   }));
+  const [expandedTradeKey, setExpandedTradeKey] = React.useState<string | null>(null);
   const [analysisFrame, setAnalysisFrame] = React.useState<AnalysisFrame>("ytd");
   const [positionSort, setPositionSort] = React.useState<{ key: PositionSortKey; direction: SortDirection }>({
-    key: "size",
+    key: "holding",
     direction: "desc"
   });
   const [stopPrices, setStopPrices] = React.useState<Record<string, string>>(() => {
@@ -758,36 +761,74 @@ function App() {
               </thead>
               <tbody>
                 {pagedClosedTrades.map((row, index) => {
-                  const entryTimestamp =
-                    row.entry_time ??
-                    (row.entry_time_str ? timestampValue(row.entry_date, row.entry_time_str) : null) ??
-                    inferEntryTimestamp(row, data?.raw_trades) ??
-                    row.entry_date;
-                  const exitTimestamp = row.exit_time ?? timestampValue(row.exit_date, row.exit_time_str);
-                  const entry = formatEntry(entryTimestamp, row.entry_time_str);
-                  const exit = formatEntry(exitTimestamp, row.exit_time_str);
-                  const holding = holdingDuration(entryTimestamp, exitTimestamp);
+                  const renderHistoryCells = (trade: ClosedTrade, symbolContent: React.ReactNode) => {
+                    const entryTimestamp =
+                      trade.entry_time ??
+                      (trade.entry_time_str ? timestampValue(trade.entry_date, trade.entry_time_str) : null) ??
+                      inferEntryTimestamp(trade, data?.raw_trades) ??
+                      trade.entry_date;
+                    const exitTimestamp = trade.exit_time ?? timestampValue(trade.exit_date, trade.exit_time_str);
+                    const entry = formatEntry(entryTimestamp, trade.entry_time_str);
+                    const exit = formatEntry(exitTimestamp, trade.exit_time_str);
+                    const holding = holdingDuration(entryTimestamp, exitTimestamp);
+                    return (
+                      <>
+                        <td>{symbolContent}</td>
+                        <td>
+                          <span className="entry-cell">
+                            <span>{entry.date}</span>
+                            {entry.time ? <span className="entry-time">({entry.time})</span> : null}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="entry-cell">
+                            <span>{exit.date}</span>
+                            {exit.time ? <span className="entry-time">({exit.time})</span> : null}
+                          </span>
+                        </td>
+                        <td>{numeric(trade.entry_price)}</td>
+                        <td>{numeric(trade.exit_price)}</td>
+                        <td><span className={gainBadgeClassName(trade.pnl_pct)}>{percent(trade.pnl_pct)}</span></td>
+                        <td><span className={gainBadgeClassName(trade.pnl_portfolio_pct)}>{trade.pnl_portfolio_pct == null ? "-" : `${numeric(trade.pnl_portfolio_pct, 2)}%`}</span></td>
+                        <td><span className={holdingClassName(holding.days)}>{holding.label}</span></td>
+                      </>
+                    );
+                  };
+                  const rowKey = `${row.symbol}-${row.exit_time ?? row.exit_date}-${currentPage}-${index}`;
+                  const expandable = row.pnl > 0 && (row.partials?.length ?? 0) > 1;
+                  const expanded = expandedTradeKey === rowKey;
+                  const symbolContent = (
+                    <span className="history-symbol-cell">
+                      <span>{row.symbol}</span>
+                      {expandable ? (
+                        <button
+                          className="trim-toggle"
+                          type="button"
+                          aria-label={`${expanded ? "Hide" : "Show"} ${row.symbol} trims`}
+                          aria-expanded={expanded}
+                          onClick={() => setExpandedTradeKey((current) => (current === rowKey ? null : rowKey))}
+                        >
+                          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                        </button>
+                      ) : null}
+                    </span>
+                  );
                   return (
-                    <tr key={`${row.symbol}-${row.exit_time ?? row.exit_date}-${currentPage}-${index}`}>
-                      <td>{row.symbol}</td>
-                      <td>
-                        <span className="entry-cell">
-                          <span>{entry.date}</span>
-                          {entry.time ? <span className="entry-time">({entry.time})</span> : null}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="entry-cell">
-                          <span>{exit.date}</span>
-                          {exit.time ? <span className="entry-time">({exit.time})</span> : null}
-                        </span>
-                      </td>
-                      <td>{numeric(row.entry_price)}</td>
-                      <td>{numeric(row.exit_price)}</td>
-                      <td><span className={gainBadgeClassName(row.pnl_pct)}>{percent(row.pnl_pct)}</span></td>
-                      <td><span className={gainBadgeClassName(row.pnl_portfolio_pct)}>{row.pnl_portfolio_pct == null ? "-" : `${numeric(row.pnl_portfolio_pct, 2)}%`}</span></td>
-                      <td><span className={holdingClassName(holding.days)}>{holding.label}</span></td>
-                    </tr>
+                    <React.Fragment key={rowKey}>
+                      <tr>{renderHistoryCells(row, symbolContent)}</tr>
+                      {expanded
+                        ? row.partials?.map((partial, partialIndex) => {
+                            const trimPct =
+                              partial.trim_pct ??
+                              (row.segment_max ? (partial.quantity / row.segment_max) * 100 : row.quantity ? (partial.quantity / row.quantity) * 100 : null);
+                            return (
+                              <tr className="trim-row" key={`${rowKey}-trim-${partialIndex}`}>
+                                {renderHistoryCells(partial, <span className="trim-label">{trimPct == null ? "-" : `${numeric(trimPct, 0)}%`}</span>)}
+                              </tr>
+                            );
+                          })
+                        : null}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
